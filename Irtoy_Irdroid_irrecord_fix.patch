@@ -1,0 +1,65 @@
+--- ir_toy.c	2022-01-21 10:42:44.217177072 +0200
++++ drivers/media/rc/ir_toy.c	2022-01-21 10:37:11.547381067 +0200
+@@ -28,7 +28,7 @@
+ static const u8 COMMAND_SMODE_ENTER[] = { 's' };
+ static const u8 COMMAND_SMODE_EXIT[] = { 0 };
+ static const u8 COMMAND_TXSTART[] = { 0x26, 0x24, 0x25, 0x03 };
+-
++static bool  lastv = false;
+ #define REPLY_XMITCOUNT 't'
+ #define REPLY_XMITSUCCESS 'C'
+ #define REPLY_VERSION 'V'
+@@ -126,25 +126,49 @@
+ 	case STATE_COMMAND_NO_RESP:
+ 	case STATE_IRDATA: {
+ 		struct ir_raw_event rawir = { .pulse = irtoy->pulse };
++		
+ 		__be16 *in = (__be16 *)irtoy->in;
+ 		int i;
+-
++			
+ 		for (i = 0; i < len / sizeof(__be16); i++) {
+ 			u16 v = be16_to_cpu(in[i]);
+-
++		
++			/* The irrecord utility requires end marker after transmission. A start marker is also needed before each new signal.
++                         * The Irtoy / Irdroid are sending end of signal marker 0xffff after 1.7s of inactivity from
++			 * the infrared receiver module, without these markers the irrecord utility isnt working properly
++			 * compaining "Couldn't find GAP between signal" resulting in inability to record any remote.
++			 * Lircd is also not working properly without those markers.
++			*/ 		
++
++			if (lastv){
++			rawir.pulse = false;
++                                rawir.duration = 1000000;
++                                ir_raw_event_store(irtoy->rc, &rawir);
++                                rawir.pulse = true;
++                                lastv = false;
++			}
++					
+ 			if (v == 0xffff) {
++
++				rawir.pulse = false;
++				rawir.duration = 1000000;
++                                ir_raw_event_store(irtoy->rc, &rawir);
+ 				rawir.pulse = false;
+-			} else {
++				lastv = true;
++			} 
++			else {
+ 				rawir.duration = v * UNIT_US;
+ 				ir_raw_event_store_with_timeout(irtoy->rc,
+ 								&rawir);
++				
+ 			}
+ 
++			
+ 			rawir.pulse = !rawir.pulse;
++			
+ 		}
+ 
+ 		irtoy->pulse = rawir.pulse;
+-
+ 		ir_raw_event_handle(irtoy->rc);
+ 		break;
+ 	}
